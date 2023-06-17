@@ -1,0 +1,105 @@
+#import一些基本套件
+import pandas as pd
+import matplotlib.pyplot as plt
+import seaborn as sns
+from sklearn.model_selection import cross_val_score
+import numpy as np
+
+# 模型
+from sklearn.tree import DecisionTreeRegressor
+from sklearn.ensemble import RandomForestRegressor
+import xgboost as xgb
+from lightgbm import LGBMRegressor
+from sklearn.linear_model import LinearRegression
+
+#讀資料庫
+train = pd.read_csv('train.csv', index_col = 'id')
+test = pd.read_csv('test.csv', index_col = 'id')
+submission = pd.read_csv('sample_submission.csv', index_col = 'id')
+
+train.head()
+test.head()
+
+#處理缺失值
+print('TRAIN')
+print(train.isnull().sum())
+print('')
+print('TEST')
+print(test.isnull().sum())
+
+#>>>>沒有缺失值
+
+#畫圖時間
+
+fig, ax = plt.subplots(ncols=4, nrows=(len(train.columns)//4+1) if len(train.columns) % 4 != 0 else len(train.columns)//4, figsize=(15,15)) 
+index = 0
+
+for row in ax:
+    for col in row:
+        if (index >= len(train.columns)):
+            break
+        
+        col.title.set_text(train.columns[index])
+        col.hist(train[train.columns[index]])#直方圖
+        col.axes.set_xlabel("X_value")
+        col.axes.set_ylabel("Frequency")
+        index += 1
+fig.tight_layout(pad=5.0)
+plt.show()
+
+#熱力圖
+fig, ax = plt.subplots(figsize=(15,15)) 
+sns.heatmap(train.corr(),   annot=True)
+#從下面的熱力圖可以看出，與強度（Strength）之間幾乎沒有強烈的線性相關性。
+#最強的特徵是"AgeInDays"，相關係數為0.33
+
+#Superplasticizer = train.groupby('SuperplasticizerComponent')['Strength'].mean().sort_values(ascending = False).round(2)
+#Superplasticizer.to_frame()
+#Superplasticizer.plot()
+
+#畫個"AgeInDays"和強度的趨勢圖。
+agedays = train.groupby('AgeInDays')['Strength'].mean().sort_values(ascending = False).round(2)
+agedays.to_frame()
+agedays.plot()
+
+#預測模型
+X,y = train.drop(columns = 'Strength'), train.Strength
+dt = DecisionTreeRegressor(max_depth = 4)
+rf = RandomForestRegressor(max_depth = 6, n_estimators = 90, random_state = 37)
+boost =xgb.XGBRegressor(max_depth = 4, n_estimators = 14, random_state = 37)
+lgbr = LGBMRegressor(n_estimators = 45, max_depth = 3, random_state = 37)
+lr = LinearRegression()
+
+scorer = 'neg_root_mean_squared_error'
+
+#五選一
+print("DecisionTree score = ", cross_val_score(dt, X, y, cv=5, scoring = scorer).mean()*-1)
+print("RandomForest score = ", cross_val_score(rf, X, y, cv=5, scoring = scorer).mean()*-1)
+print("XGBR score = ", cross_val_score(boost, X, y, cv=5, scoring = scorer).mean()*-1)
+print("LGBMR score = ", cross_val_score(lgbr, X, y, cv=5, scoring = scorer).mean()*-1)
+print("Linear score = ", cross_val_score(lr, X, y, cv=5, scoring = scorer).mean()*-1)
+#LGBR最好
+
+#最終模型選LGBR
+predictions = pd.DataFrame(
+    columns=['lgbr'],
+    index=[np.arange(5407,9012)])
+
+lgbr.fit(X,y)
+predictions['lgbr'] = lgbr.predict(test)
+
+predictions
+
+#特徵工程
+feature_imp = pd.Series(lgbr.feature_importances_,index=X.columns).sort_values(ascending=False)
+sns.barplot(x=feature_imp, y=feature_imp.index)
+plt.xlabel('Feature Importance Score')
+plt.ylabel('Features')
+plt.title("Feature importance using LGBM")
+plt.show()
+
+#匯出最終結果
+
+submission['Strength'] = [val for val in predictions['lgbr']]
+submission.head()
+submission.to_csv('submission.csv')
